@@ -1,0 +1,20 @@
+[package]
+name = "find_dupes"
+version = "0.1.0"
+authors = ["Bill Carlson <wwc559@gmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-std = "1.10"
+futures = "0.3"
+clap = {version = "3.0", features = ["cargo"]}
+dashmap = "4.0"
+seahash = "4.1"
+lz4 = "1.23"
+minicbor-derive = "0.8"
+
+[dependencies.minicbor]
+version = "0.12"
+features = ["std"]
