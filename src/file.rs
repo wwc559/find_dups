@@ -1,19 +1,20 @@
 //! file functions for wayback
 
 use crate::{
-    chunk::{ChunkHash, ChunkStore},
     record::Record,
     record::RecordLocation,
-    ItemReadWrite, Result, ARCHIVE_SIZE, RECORD_SIZE,
+    ItemReadWrite, Result, ARCHIVE_SIZE, RECORD_SIZE, CHUNK_SIZE,
 };
-use async_std::fs::Metadata;
+use async_std::fs::{Metadata, File};
 use async_std::path::PathBuf;
+use async_std::prelude::*;
 use async_std::sync::Arc;
 use dashmap::DashMap;
 use minicbor_derive::{Decode, Encode};
 use std::io::{Error, ErrorKind};
 use std::time::UNIX_EPOCH;
 
+pub type ChunkHash = u64;
 // inspired by github:://rsdy/zerostash/libzerostash/file.rs
 
 #[derive(Hash, Clone, Eq, PartialEq, Default, Debug, Encode, Decode)]
@@ -94,7 +95,6 @@ impl FileStore {
         &self,
         path: &PathBuf,
         metadata: &Metadata,
-        chunk_store: &ChunkStore,
     ) -> Result<()> {
         let entry = Entry::new_from_path_meta(path, metadata)?;
         // see if we already have this, if so, we are done
@@ -103,7 +103,7 @@ impl FileStore {
         }
 
         let chunks = if entry.is_file {
-            chunk_store.add_file(path, entry.len).await?
+            hash_file(path, entry.len).await?
         } else if entry.is_dir {
             Vec::new()
         } else {
@@ -143,6 +143,29 @@ impl FileStore {
         Ok(())
     }
 }
+
+async fn hash_file(path: &PathBuf, len:u64) -> Result<Vec<ChunkHash>> {
+    let mut ret: Vec<ChunkHash> = Vec::new();
+    match File::open(path).await {
+        Ok(mut f) => {
+            let mut pos = 0;
+            // first we store full CHUNK_SIZE chunks until only partial one left
+            while pos + CHUNK_SIZE < len as usize {
+                let mut buf = vec![0; CHUNK_SIZE];
+                f.read_exact(&mut buf).await?;
+                ret.push(seahash::hash(&buf));
+                pos += CHUNK_SIZE;
+            }
+            
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).await?;
+            ret.push(seahash::hash(&buf));
+        }
+        Err(e) => eprintln!("{} while adding file", e),
+    }
+    Ok(ret)
+}    
+
 
 impl ItemReadWrite for Record<FileTuple> {
     type T = FileTuple;

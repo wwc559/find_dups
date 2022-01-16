@@ -1,6 +1,6 @@
 //! directory broker and support functions for wayback
 
-use crate::{chunk::ChunkStore, file::FileStore, Config, Result};
+use crate::{file::FileStore, Config, Result};
 use async_std::fs;
 use async_std::io;
 use async_std::path::PathBuf;
@@ -9,13 +9,13 @@ use futures::channel::mpsc::{Receiver, Sender};
 use futures::SinkExt;
 use std::time::Instant;
 
+
 #[derive(Debug)]
 pub enum DirBrokerMessage {
     NewDir { path: PathBuf, depth: usize },
     Error { e: io::Error },
     Report,
     Done { files: usize, dirs: usize },
-    //ObjDone,
 }
 
 pub async fn dir_broker_loop(
@@ -28,11 +28,9 @@ pub async fn dir_broker_loop(
     let mut dir_count: usize = 0;
     let mut file_count: usize = 0;
     let start = Instant::now();
-    let chunk_store = ChunkStore::new(&config.archive);
     let file_store = FileStore::new(&config.archive);
 
     file_store.read().await?;
-    //chunk_store.read().await?;
 
     let initial_files = file_store.index().len();
     println!("read nfile:{}", initial_files);
@@ -74,7 +72,6 @@ pub async fn dir_broker_loop(
                 path,
                 depth,
                 file_store.clone(),
-                chunk_store.clone(),
                 config.dir_broker_sender.clone(),
             ));
             active_count += 1;
@@ -95,7 +92,6 @@ pub async fn dir_broker_loop(
             if nfiles > initial_files {
                 let last_report = Instant::now();
                 file_store.write().await?;
-                //chunk_store.write().await?;
                 println!(
                     "wrote file store in {} seconds",
                     last_report.elapsed().as_millis() as f64 / 1000.0
@@ -110,7 +106,6 @@ pub async fn process_dir(
     path: PathBuf,
     depth: usize,
     file_store: FileStore,
-    chunk_store: ChunkStore,
     mut dir_broker_sender: Sender<DirBrokerMessage>,
 ) -> Result<()> {
     let mut dir = match fs::read_dir(path).await {
@@ -139,7 +134,7 @@ pub async fn process_dir(
             dirs += 1;
         } else {
             file_store
-                .add_file(&entry.path(), &metadata, &chunk_store)
+                .add_file(&entry.path(), &metadata)
                 .await?;
             files += 1;
             /*

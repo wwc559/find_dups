@@ -17,7 +17,6 @@ use futures::SinkExt;
 use std::time::Duration;
 
 pub mod archive;
-pub mod chunk;
 pub mod dir;
 pub mod file;
 pub mod record;
