@@ -185,14 +185,6 @@ impl<T> Record<T> {
     pub fn flush(&mut self) -> Result<()> {
         if self.write_buffer.len() > 0 {
             let compressed = compress(&self.write_buffer, None, true)?;
-            if false {
-                println!(
-                    "{}:in {} out {}",
-                    self.archive.record_type(),
-                    self.write_buffer.len(),
-                    compressed.len()
-                );
-            }
             // write compressed length
             self.archive.write(&usize_to_slice_u8(compressed.len()))?;
             // write compressed data
@@ -234,15 +226,6 @@ impl<T> Record<T> {
         if let Some(clenbuf) = self.archive.read(4)? {
             let clen = slice_u8_to_usize(clenbuf);
             if let Some(cbuf) = self.archive.read(clen)? {
-                if false {
-                    eprintln!(
-                        "clen:{},{} len:{} offset:{}",
-                        clen,
-                        cbuf.len(),
-                        slice_u8_to_usize(cbuf),
-                        self.read_offset
-                    );
-                }
                 let ucbuf = decompress(cbuf, None)?;
                 if self.read_buffer.is_none() {
                     self.read_buffer = ReadBuf::new_with_data(&ucbuf);

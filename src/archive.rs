@@ -112,9 +112,6 @@ impl Archive {
         // someone through self.write_lcoation() that we were going
         // to.  Also, make sure we are not exceeding it!  This is
         // easy with LZ4 compression as there is a fixed worst case size
-        if v.len() >= MAX_COMPRESSED_CHUNK_SIZE {
-            eprintln!("vl {} max {}", v.len(), MAX_COMPRESSED_CHUNK_SIZE);
-        }
         assert!(v.len() < MAX_COMPRESSED_CHUNK_SIZE);
         if self.write_buffer.len() + MAX_COMPRESSED_CHUNK_SIZE > self.limit {
             self.flush()?;
@@ -175,8 +172,6 @@ impl Archive {
                 "{}/{:04}_{}.cbor",
                 self.archive, self.read_serial_number, self.record_type
             );
-
-            //eprintln!("reading file {}", name);
             self.read_buffer = read_file(name)?;
         }
         if let Some(buf) = &self.read_buffer {

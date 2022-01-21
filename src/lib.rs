@@ -32,25 +32,45 @@ pub const ARCHIVE_SIZE: usize = 4 * 1024 * 1024;
 pub struct Config {
     archive: String,
     dir_broker_sender: Sender<DirBrokerMessage>,
-    //obj_broker_sender: Sender<ObjBrokerMessage>,
+    injest: bool,
+    missing: bool,
+    present: bool,
+    report: bool,
+    concurrency: usize,
+    timeout: u64,
+    verbose: u64,
 }
 
 impl Config {
     pub fn new(matches: &ArgMatches) -> (Self, Receiver<DirBrokerMessage>) {
         let (dir_broker_sender, dir_broker_receiver) = channel(100);
-        //let (obj_broker_sender, obj_broker_receiver) = channel(100);
-        let archive: String = matches
-            .value_of("archive")
-            .expect("need to specify archive")
-            .to_string();
+        let present = matches.occurrences_of("present") > 0;
+        let injest = matches.occurrences_of("injest") > 0;
+        let missing = matches.occurrences_of("missing") > 0 || (!present && !injest);
         (
             Config {
-                archive: archive.to_string(),
+                archive: matches
+                    .value_of("archive")
+                    .expect("need to specify archive")
+                    .to_string(),
                 dir_broker_sender,
-                //obj_broker_sender,
+                injest,
+                report: matches.occurrences_of("report") > 0,
+                present,
+                missing,
+                verbose: matches.occurrences_of("verbose"),
+                concurrency: matches
+                    .value_of("concurrency")
+                    .unwrap()
+                    .parse()
+                    .expect("concurrency"),
+                timeout: matches
+                    .value_of("timeout")
+                    .unwrap()
+                    .parse()
+                    .expect("timeout"),
             },
             dir_broker_receiver,
-            //obj_broker_receiver,
         )
     }
 }
@@ -66,6 +86,9 @@ pub async fn launch_brokers(
     dir_receiver: Receiver<DirBrokerMessage>,
     injests: Vec<&str>,
 ) -> Result<()> {
+    if config.verbose > 2 {
+        eprintln!("Config: {:?}", config)
+    }
     let mut sender = config.dir_broker_sender.clone();
     for injest in injests {
         sender
@@ -104,7 +127,7 @@ where
 {
     task::spawn(async move {
         if let Err(e) = fut.await {
-            eprintln!("{}", e)
+            eprintln!("spawn: {}", e)
         }
     })
 }

@@ -1,11 +1,10 @@
 //! file functions for wayback
 
 use crate::{
-    record::Record,
-    record::RecordLocation,
-    ItemReadWrite, Result, ARCHIVE_SIZE, RECORD_SIZE, CHUNK_SIZE,
+    record::Record, record::RecordLocation, Config, ItemReadWrite, Result, ARCHIVE_SIZE,
+    CHUNK_SIZE, RECORD_SIZE,
 };
-use async_std::fs::{Metadata, File};
+use async_std::fs::{File, Metadata};
 use async_std::path::PathBuf;
 use async_std::prelude::*;
 use async_std::sync::Arc;
@@ -65,25 +64,30 @@ impl Entry {
     }
 }
 
-pub type FileIndex = DashMap<Arc<Entry>, Vec<ChunkHash>>;
-pub type FileTuple = (Arc<Entry>, Vec<ChunkHash>);
+pub type FileIndex = DashMap<Arc<Entry>, ChunkHash>;
+pub type HashIndex = DashMap<ChunkHash, Vec<Arc<Entry>>>;
+pub type FileTuple = (Arc<Entry>, ChunkHash);
 
 #[derive(Clone, Debug)]
 pub struct FileStore {
     index: Arc<FileIndex>,
+    hindex: Arc<HashIndex>,
     record: crate::record::Record<FileTuple>,
+    config: Config,
 }
 
 impl FileStore {
-    pub fn new(archive: &String) -> Self {
+    pub fn new(archive: &String, config: Config) -> Self {
         FileStore {
             index: Arc::new(FileIndex::new()),
+            hindex: Arc::new(HashIndex::new()),
             record: crate::record::Record::new(
                 archive,
                 "file".to_string(),
                 ARCHIVE_SIZE,
                 RECORD_SIZE,
             ),
+            config: config,
         }
     }
 
@@ -91,33 +95,69 @@ impl FileStore {
         &self.index
     }
 
-    pub async fn add_file(
-        &self,
-        path: &PathBuf,
-        metadata: &Metadata,
-    ) -> Result<()> {
+    pub async fn add_file(&self, path: &PathBuf, metadata: &Metadata) -> Result<()> {
         let entry = Entry::new_from_path_meta(path, metadata)?;
-        // see if we already have this, if so, we are done
+        // see if we already have this
         if self.index.contains_key(&entry) {
-            return Ok(());
-        }
-
-        let chunks = if entry.is_file {
-            hash_file(path, entry.len).await?
-        } else if entry.is_dir {
-            Vec::new()
+            // if we are checking, we need to see if there are at least 2 entries
+            if self.config.present || self.config.missing {
+                let hash = self.index.get(&entry).unwrap();
+                let files = self.hindex.get(&hash).unwrap();
+                if files.len() >= 2 && self.config.present {
+                    if self.config.verbose > 1 {
+                        println!("{} is present in archive", entry.name);
+                    } else {
+                        println!("{}", entry.name);
+                    }
+                }
+                if files.len() < 2 && self.config.missing {
+                    if self.config.verbose > 1 {
+                        println!("{} is not present in archive", entry.name);
+                    } else {
+                        println!("{}", entry.name);
+                    }
+                }
+            }
         } else {
-            Vec::new() // Sym link, need to figure it out
-        };
+            let hash = if entry.is_file {
+                let vec = hash_file(path, entry.len).await?;
+                vec.iter().fold(entry.len, |acc, x| acc ^ x)
+            } else if entry.is_dir {
+                0
+            } else {
+                0
+            };
 
-        self.index.insert(Arc::new(entry), chunks);
+            // if we are checking, we need to see if it is already in the hash
+            if self.config.present || self.config.missing {
+                let is_present = self.hindex.contains_key(&hash);
+                if is_present && self.config.present {
+                    if self.config.verbose > 1 {
+                        println!("{} is present in archive", entry.name);
+                    } else {
+                        println!("{}", entry.name);
+                    }
+                }
+                if !is_present && self.config.missing {
+                    if self.config.verbose > 1 {
+                        println!("{} is not present in archive", entry.name);
+                    } else {
+                        println!("{}", entry.name);
+                    }
+                }
+            }
+
+            if self.config.injest {
+                self.index.insert(Arc::new(entry), hash);
+            }
+        }
         Ok(())
     }
 
     pub async fn write(&self) -> Result<()> {
         let mut record = self.record.clone();
         for item in self.index.iter() {
-            record.write_item(&(item.key().clone(), item.value().to_vec()))?;
+            record.write_item(&(item.key().clone(), *item.value()))?;
         }
         record.finish().await?;
         Ok(())
@@ -129,43 +169,57 @@ impl FileStore {
             match record.read_item() {
                 Ok(Some((i0, i1))) => {
                     //println!("got {}, {} chunks", i0.name, i1.len());
-                    self.index.insert(i0, i1);
+                    self.index.insert(i0.clone(), i1);
+                    let newval = if self.hindex.contains_key(&i1) {
+                        let (_key, mut vec) = self.hindex.remove(&i1).unwrap();
+                        vec.push(i0);
+                        vec
+                    } else {
+                        vec![i0]
+                    };
+                    self.hindex.insert(i1, newval);
                 }
                 Ok(None) => {
                     break;
                 }
                 Err(e) => {
-                    eprintln!("{}", e);
+                    eprintln!("read file::Entry:{}", e);
                     break;
                 }
             }
         }
         Ok(())
     }
+
+    pub async fn report(&self) -> Result<()> {
+        for item in self.hindex.iter() {
+            let files = item.value();
+            if files.len() > 1 && files[0].len > 1000000 {
+                let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+                println!("{:8} {}", files[0].len, names.join("\n         "));
+            }
+        }
+        return Ok(());
+    }
 }
 
-async fn hash_file(path: &PathBuf, len:u64) -> Result<Vec<ChunkHash>> {
+async fn hash_file(path: &PathBuf, len: u64) -> Result<Vec<ChunkHash>> {
     let mut ret: Vec<ChunkHash> = Vec::new();
-    match File::open(path).await {
-        Ok(mut f) => {
-            let mut pos = 0;
-            // first we store full CHUNK_SIZE chunks until only partial one left
-            while pos + CHUNK_SIZE < len as usize {
-                let mut buf = vec![0; CHUNK_SIZE];
-                f.read_exact(&mut buf).await?;
-                ret.push(seahash::hash(&buf));
-                pos += CHUNK_SIZE;
-            }
-            
-            let mut buf = Vec::new();
-            f.read_to_end(&mut buf).await?;
-            ret.push(seahash::hash(&buf));
-        }
-        Err(e) => eprintln!("{} while adding file", e),
+    let mut f = File::open(path).await?;
+    let mut pos = 0;
+    // first we store full CHUNK_SIZE chunks until only partial one left
+    while pos + CHUNK_SIZE < len as usize {
+        let mut buf = vec![0; CHUNK_SIZE];
+        f.read_exact(&mut buf).await?;
+        ret.push(seahash::hash(&buf));
+        pos += CHUNK_SIZE;
     }
-    Ok(ret)
-}    
 
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).await?;
+    ret.push(seahash::hash(&buf));
+    Ok(ret)
+}
 
 impl ItemReadWrite for Record<FileTuple> {
     type T = FileTuple;
