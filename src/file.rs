@@ -11,7 +11,7 @@ use async_std::sync::Arc;
 use dashmap::DashMap;
 use minicbor_derive::{Decode, Encode};
 use std::io::{Error, ErrorKind};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub type ChunkHash = u64;
 // inspired by github:://rsdy/zerostash/libzerostash/file.rs
@@ -156,11 +156,6 @@ impl FileStore {
                             println!("{}", names.join("\n"));
                         }
                     }
-                    if self.config.verbose > 1 {
-                        println!("{} is present in archive", entry.name);
-                    } else {
-                        println!("{}", entry.name);
-                    }
                 }
                 if !is_present && self.config.missing {
                     if self.config.verbose > 1 {
@@ -219,32 +214,45 @@ impl FileStore {
         let mut ndup_big = 0;
         let mut ndup = 0;
         let mut total_size = 0;
-        for item in self.hindex.iter() {
-            let files = item.value();
-            if files.len() > 1 {
-                if self.config.duplicate && self.config.injest {
-                    // if we are not checking and are reporting duplicates
-                    // do so here
-                    let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
-                    if self.config.verbose > 1 {
-                        println!("Archive duplicates: {}", names.join(", "));
-                    } else {
-                        println!("{}", names.join("\n"));
-                    }
-                }
-                ndup += 1;
-                total_size += files[0].len * (files.len() - 1) as u64;
-                if files[0].len > 1000000 {
-                    ndup_big += 1;
+        if self.config.list {
+            for item in self.index.iter() {
+                let entry = item.key();
+                let mtime = SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(entry.mod_secs));
+                if self.config.verbose > 1 {
+                    println!("{:9} {:?} {}", entry.len, mtime, entry.name);
+                } else {
+                    println!("{}", entry.name);
                 }
             }
         }
-        println!(
-            "{} dup, {} dup big, {} total Gbytes dup",
-            ndup,
-            ndup_big,
-            total_size / (1000 * 1000 * 1000)
-        );
+        if self.config.duplicate || self.config.report {
+            for item in self.hindex.iter() {
+                let files = item.value();
+                if files.len() > 1 {
+                    if self.config.duplicate && self.config.injest {
+                        // if we are not checking and are reporting duplicates
+                        // do so here
+                        let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+                        if self.config.verbose > 1 {
+                            println!("Archive duplicates: {}", names.join(", "));
+                        } else {
+                            println!("{}", names.join("\n"));
+                        }
+                    }
+                    ndup += 1;
+                    total_size += files[0].len * (files.len() - 1) as u64;
+                    if files[0].len > 1000000 {
+                        ndup_big += 1;
+                    }
+                }
+            }
+            println!(
+                "{} dup, {} dup big, {} total Gbytes dup",
+                ndup,
+                ndup_big,
+                total_size / (1000 * 1000 * 1000)
+            );
+        }
         return Ok(());
     }
 }

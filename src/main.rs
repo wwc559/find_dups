@@ -18,20 +18,30 @@ fn main() {
         .arg(
             arg!(-m --missing "Report check/injest files which are missing from archive [default with --check]")
                 .required(false)
+                .conflicts_with("list")
                 .conflicts_with("duplicate")
                 .conflicts_with("present"),
         )
         .arg(
             arg!(-p --present "Report check/injest files which are present in archive")
                 .required(false)
+                .conflicts_with("list")
                 .conflicts_with("duplicate")
                 .conflicts_with("missing"),
         )
         .arg(
             arg!(-d --duplicate "Report archive files which match check or archive duplicates if not check")
                 .required(false)
+                .conflicts_with("list")
                 .conflicts_with("missing")
                 .conflicts_with("present"),
+        )
+        .arg(
+            arg!(-l --list "List contents of archive after injest (if any)")
+                .required(false)
+                .conflicts_with("missing")
+                .conflicts_with("present")
+                .conflicts_with("duplicate"),
         )
         .arg(
             arg!(-a --archive <path> "Path to archive")

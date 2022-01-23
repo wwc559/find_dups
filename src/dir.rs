@@ -146,7 +146,7 @@ pub async fn dir_broker_loop(
                     last_report.elapsed().as_millis() as f64 / 1000.0
                 );
             }
-            if config.report || (config.injest && config.duplicate) {
+            if config.report || config.list || (config.injest && config.duplicate) {
                 file_store.report().await?;
             }
             return Ok(());
