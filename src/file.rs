@@ -103,11 +103,20 @@ impl FileStore {
             if self.config.present || self.config.missing {
                 let hash = self.index.get(&entry).unwrap();
                 let files = self.hindex.get(&hash).unwrap();
-                if files.len() >= 2 && self.config.present {
-                    if self.config.verbose > 1 {
-                        println!("{} is present in archive", entry.name);
-                    } else {
-                        println!("{}", entry.name);
+                if files.len() >= 2 {
+                    if self.config.present {
+                        if self.config.verbose > 1 {
+                            println!("{} is present in archive", entry.name);
+                        } else {
+                            println!("{}", entry.name);
+                        }
+                    } else if self.config.duplicate {
+                        let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+                        if self.config.verbose > 1 {
+                            println!("Archive files matching: {}", names.join(", "));
+                        } else {
+                            println!("{}", names.join("\n"));
+                        }
                     }
                 }
                 if files.len() < 2 && self.config.missing {
@@ -129,9 +138,24 @@ impl FileStore {
             };
 
             // if we are checking, we need to see if it is already in the hash
-            if self.config.present || self.config.missing {
+            if self.config.present || self.config.missing || self.config.duplicate {
                 let is_present = self.hindex.contains_key(&hash);
-                if is_present && self.config.present {
+                if is_present {
+                    if self.config.present {
+                        if self.config.verbose > 1 {
+                            println!("{} is present in archive", entry.name);
+                        } else {
+                            println!("{}", entry.name);
+                        }
+                    } else if self.config.duplicate {
+                        let files = self.hindex.get(&hash).unwrap();
+                        let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+                        if self.config.verbose > 1 {
+                            println!("Archive files matching: {}", names.join(", "));
+                        } else {
+                            println!("{}", names.join("\n"));
+                        }
+                    }
                     if self.config.verbose > 1 {
                         println!("{} is present in archive", entry.name);
                     } else {
@@ -192,13 +216,35 @@ impl FileStore {
     }
 
     pub async fn report(&self) -> Result<()> {
+        let mut ndup_big = 0;
+        let mut ndup = 0;
+        let mut total_size = 0;
         for item in self.hindex.iter() {
             let files = item.value();
-            if files.len() > 1 && files[0].len > 1000000 {
-                let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
-                println!("{:8} {}", files[0].len, names.join("\n         "));
+            if files.len() > 1 {
+                if self.config.duplicate && self.config.injest {
+                    // if we are not checking and are reporting duplicates
+                    // do so here
+                    let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+                    if self.config.verbose > 1 {
+                        println!("Archive duplicates: {}", names.join(", "));
+                    } else {
+                        println!("{}", names.join("\n"));
+                    }
+                }
+                ndup += 1;
+                total_size += files[0].len * (files.len() - 1) as u64;
+                if files[0].len > 1000000 {
+                    ndup_big += 1;
+                }
             }
         }
+        println!(
+            "{} dup, {} dup big, {} total Gbytes dup",
+            ndup,
+            ndup_big,
+            total_size / (1000 * 1000 * 1000)
+        );
         return Ok(());
     }
 }

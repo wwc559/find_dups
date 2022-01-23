@@ -1,5 +1,5 @@
 [package]
-name = "find_dupes"
+name = "find_dups"
 version = "0.1.0"
 authors = ["Bill Carlson <wwc559@gmail.com>"]
 edition = "2021"

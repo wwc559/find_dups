@@ -1,7 +1,7 @@
 use async_std::task;
 use clap::{app_from_crate, arg};
 
-use find_dupes::{launch_brokers, Config};
+use find_dups::{launch_brokers, Config};
 
 fn main() {
     let matches = app_from_crate!()
@@ -16,21 +16,29 @@ fn main() {
                 .conflicts_with("injest"),
         )
         .arg(
-            arg!(-m --missing "Report missing files in archive (default with --check")
+            arg!(-m --missing "Report check/injest files which are missing from archive [default with --check]")
                 .required(false)
+                .conflicts_with("duplicate")
                 .conflicts_with("present"),
         )
         .arg(
-            arg!(-p --present "Report files present in archive")
+            arg!(-p --present "Report check/injest files which are present in archive")
                 .required(false)
+                .conflicts_with("duplicate")
                 .conflicts_with("missing"),
+        )
+        .arg(
+            arg!(-d --duplicate "Report archive files which match check or archive duplicates if not check")
+                .required(false)
+                .conflicts_with("missing")
+                .conflicts_with("present"),
         )
         .arg(
             arg!(-a --archive <path> "Path to archive")
                 .required(false)
-                .default_value("/tmp/finddupes"),
+                .default_value("/tmp/finddups"),
         )
-        .arg(arg!(-r --report "Produce a report of duplicate files").required(false))
+        .arg(arg!(-r --report "Produce a report summarizing duplicate files").required(false))
         .arg(arg!(-v --verbose ... "increase verbosity level").required(false))
         .arg(
             arg!(-t --timeout <sec> "Timeout after a certain time of no activity")

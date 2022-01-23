@@ -35,6 +35,7 @@ pub struct Config {
     injest: bool,
     missing: bool,
     present: bool,
+    duplicate: bool,
     report: bool,
     concurrency: usize,
     timeout: u64,
@@ -45,8 +46,9 @@ impl Config {
     pub fn new(matches: &ArgMatches) -> (Self, Receiver<DirBrokerMessage>) {
         let (dir_broker_sender, dir_broker_receiver) = channel(100);
         let present = matches.occurrences_of("present") > 0;
-        let injest = matches.occurrences_of("injest") > 0;
-        let missing = matches.occurrences_of("missing") > 0 || (!present && !injest);
+        let duplicate = matches.occurrences_of("duplicate") > 0;
+        let injest = matches.occurrences_of("check") == 0;
+        let missing = matches.occurrences_of("missing") > 0 || (!injest && !present && !duplicate);
         (
             Config {
                 archive: matches
@@ -58,6 +60,7 @@ impl Config {
                 report: matches.occurrences_of("report") > 0,
                 present,
                 missing,
+                duplicate,
                 verbose: matches.occurrences_of("verbose"),
                 concurrency: matches
                     .value_of("concurrency")
