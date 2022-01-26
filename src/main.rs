@@ -11,7 +11,7 @@ fn main() {
                 .conflicts_with("check"),
         )
         .arg(
-            arg!(-c --check <path> "Path to check")
+            arg!(-c --check <path> ... "Path to check")
                 .required(false)
                 .conflicts_with("injest"),
         )
