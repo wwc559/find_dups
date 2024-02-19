@@ -44,6 +44,11 @@ fn main() {
                 .conflicts_with("duplicate"),
         )
         .arg(
+            arg!(--prune "Prune non-injested files from archive")
+                .required(false)
+                .requires("injest")
+        )
+        .arg(
             arg!(-a --archive <path> "Path to archive")
                 .required(false)
                 .default_value("/tmp/finddups"),

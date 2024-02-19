@@ -138,6 +138,15 @@ pub async fn dir_broker_loop(
                 error_count,
                 start.elapsed().as_millis() as f64 / 1000.0
             );
+
+            if config.prune {
+                file_store.prune().await?;
+            }
+
+            if config.report || config.list || (config.injest && config.duplicate) {
+                file_store.report().await?;
+            }
+
             if config.injest && nfiles > initial_files {
                 let last_report = Instant::now();
                 file_store.write().await?;
@@ -146,9 +155,7 @@ pub async fn dir_broker_loop(
                     last_report.elapsed().as_millis() as f64 / 1000.0
                 );
             }
-            if config.report || config.list || (config.injest && config.duplicate) {
-                file_store.report().await?;
-            }
+
             return Ok(());
         }
     }

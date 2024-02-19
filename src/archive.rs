@@ -1,9 +1,11 @@
 use crate::{Result, MAX_COMPRESSED_CHUNK_SIZE};
-use async_std::fs::File;
+use async_std::fs::{create_dir, read_dir, rename, File};
+use async_std::path::Path;
 use async_std::prelude::*;
 use async_std::sync::Arc;
 use async_std::task;
 use minicbor_derive::{Decode, Encode};
+use regex::Regex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -58,7 +60,7 @@ impl std::fmt::Debug for Archive {
 }
 
 impl Archive {
-    pub fn new(archive: &String, record_type: String, limit: usize) -> Self {
+    pub fn new(archive: &str, record_type: String, limit: usize) -> Self {
         Archive {
             write_buffer: Vec::new(),
             write_serial_number: 0,
@@ -192,6 +194,30 @@ impl Archive {
         self.read_buffer = None;
         self.read_serial_number = location.archive_set;
         self.read_offset = location.set_offset;
+        Ok(())
+    }
+
+    pub async fn backup(&self) -> Result<()> {
+        let backup = format!("{}/{}.backup", self.archive, self.record_type);
+
+        if !Path::new(&backup).exists().await {
+            create_dir(&backup).await?;
+        }
+
+        let mut dir = read_dir(&self.archive).await?;
+
+        let regex_str = format!(".*(\\d{{4}}_{}.cbor)", self.record_type);
+        let re = Regex::new(&regex_str).unwrap();
+        while let Some(res) = dir.next().await {
+            let entry = res?;
+            let path = entry.path().into_os_string().into_string().unwrap();
+            if let Some(caps) = re.captures(&path) {
+                let file_name = caps.get(1).unwrap().as_str();
+                let to = format!("{}/{}", backup, file_name);
+                println!("mv {} {}", &path, to);
+                rename(entry.path(), to).await?;
+            }
+        }
         Ok(())
     }
 }

@@ -38,6 +38,7 @@ pub struct Config {
     duplicate: bool,
     list: bool,
     report: bool,
+    prune: bool,
     concurrency: usize,
     timeout: u64,
     verbose: u64,
@@ -58,20 +59,21 @@ impl Config {
                     .to_string(),
                 dir_broker_sender,
                 injest,
-                list: matches.occurrences_of("list") > 0,
-                report: matches.occurrences_of("report") > 0,
                 present,
                 missing,
                 duplicate,
+                list: matches.occurrences_of("list") > 0,
+                report: matches.occurrences_of("report") > 0,
+                prune: matches.occurrences_of("prune") > 0,
                 verbose: matches.occurrences_of("verbose"),
                 concurrency: matches
                     .value_of("concurrency")
-                    .unwrap()
+                    .unwrap_or("10")
                     .parse()
                     .expect("concurrency"),
                 timeout: matches
                     .value_of("timeout")
-                    .unwrap()
+                    .unwrap_or("600")
                     .parse()
                     .expect("timeout"),
             },

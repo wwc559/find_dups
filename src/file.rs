@@ -8,7 +8,7 @@ use async_std::fs::{File, Metadata};
 use async_std::path::PathBuf;
 use async_std::prelude::*;
 use async_std::sync::Arc;
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use minicbor_derive::{Decode, Encode};
 use std::io::{Error, ErrorKind};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -67,6 +67,7 @@ impl Entry {
 pub type FileIndex = DashMap<Arc<Entry>, ChunkHash>;
 pub type HashIndex = DashMap<ChunkHash, Vec<Arc<Entry>>>;
 pub type FileTuple = (Arc<Entry>, ChunkHash);
+pub type PresentSet = DashSet<Arc<Entry>>;
 
 #[derive(Clone, Debug)]
 pub struct FileStore {
@@ -74,10 +75,11 @@ pub struct FileStore {
     hindex: Arc<HashIndex>,
     record: crate::record::Record<FileTuple>,
     config: Config,
+    present: Arc<PresentSet>,
 }
 
 impl FileStore {
-    pub fn new(archive: &String, config: Config) -> Self {
+    pub fn new(archive: &str, config: Config) -> Self {
         FileStore {
             index: Arc::new(FileIndex::new()),
             hindex: Arc::new(HashIndex::new()),
@@ -87,6 +89,7 @@ impl FileStore {
                 ARCHIVE_SIZE,
                 RECORD_SIZE,
             ),
+            present: Arc::new(PresentSet::new()),
             config: config,
         }
     }
@@ -97,8 +100,9 @@ impl FileStore {
 
     pub async fn add_file(&self, path: &PathBuf, metadata: &Metadata) -> Result<()> {
         let entry = Entry::new_from_path_meta(path, metadata)?;
-        // see if we already have this
+
         if self.index.contains_key(&entry) {
+            // Yay, already present!
             // if we are checking, we need to see if there are at least 2 entries
             if self.config.present || self.config.missing {
                 let hash = self.index.get(&entry).unwrap();
@@ -127,7 +131,12 @@ impl FileStore {
                     }
                 }
             }
+            if self.config.prune {
+                // if pruning we need to remember we have seen it
+                self.present.insert(Arc::new(entry));
+            }
         } else {
+            // Not present, calculate hash
             let hash = if entry.is_file {
                 let vec = hash_file(path, entry.len).await?;
                 vec.iter().fold(entry.len, |acc, x| acc ^ x)
@@ -167,6 +176,10 @@ impl FileStore {
             }
 
             if self.config.injest {
+                if self.config.prune {
+                    // if pruning we need to remember we have seen it
+                    self.present.insert(Arc::new(entry.clone()));
+                }
                 self.index.insert(Arc::new(entry), hash);
             }
         }
@@ -175,6 +188,7 @@ impl FileStore {
 
     pub async fn write(&self) -> Result<()> {
         let mut record = self.record.clone();
+        record.backup().await?;
         for item in self.index.iter() {
             record.write_item(&(item.key().clone(), *item.value()))?;
         }
@@ -210,6 +224,32 @@ impl FileStore {
         Ok(())
     }
 
+    pub async fn prune(&self) -> Result<()> {
+        if self.present.len() > 0 {
+            if self.config.verbose > 0 {
+                eprintln!("pruning files not injested");
+            }
+            let mut to_remove = Vec::new();
+            for item in self.index.iter() {
+                let entry = item.key();
+                if !self.present.contains(entry) {
+                    to_remove.push(entry.clone());
+                    if self.config.verbose > 1 {
+                        eprintln!("pruning {}", entry.name);
+                    } else {
+                        println!("{}", entry.name);
+                    }
+                }
+            }
+            for item in to_remove {
+                self.index.remove(&item);
+            }
+        } else {
+            eprintln!("Nothing found, will not prune entire archive!");
+        }
+        Ok(())
+    }
+
     pub async fn report(&self) -> Result<()> {
         let mut ndup_big = 0;
         let mut ndup = 0;
@@ -217,14 +257,16 @@ impl FileStore {
         if self.config.list {
             for item in self.index.iter() {
                 let entry = item.key();
-                let mtime = SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(entry.mod_secs));
                 if self.config.verbose > 1 {
+                    let mtime =
+                        SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(entry.mod_secs));
                     println!("{:9} {:?} {}", entry.len, mtime, entry.name);
                 } else {
                     println!("{}", entry.name);
                 }
             }
         }
+
         if self.config.duplicate || self.config.report {
             for item in self.hindex.iter() {
                 let files = item.value();
@@ -246,6 +288,7 @@ impl FileStore {
                     }
                 }
             }
+
             println!(
                 "{} dup, {} dup big, {} total Gbytes dup",
                 ndup,
@@ -254,6 +297,36 @@ impl FileStore {
             );
         }
         return Ok(());
+    }
+
+    pub fn find_dups_second_archive(&self, second: &FileStore) -> Result<()> {
+        for item in second.index.iter() {
+            let entry = item.key();
+            let present = self.hindex.contains_key(&item.value());
+            {
+                if self.config.missing && !present {
+                    if self.config.verbose > 1 {
+                        println!("{} is present not in archive", entry.name);
+                    } else {
+                        println!("{}", entry.name);
+                    }
+                }
+                if self.config.present && present && entry.len > 0 {
+                    if self.config.verbose > 1 {
+                        let files = self.hindex.get(&item.value()).unwrap();
+                        let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+                        println!(
+                            "{} is present in archive at {}",
+                            entry.name,
+                            names.join(", ")
+                        );
+                    } else {
+                        println!("{}", entry.name);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 

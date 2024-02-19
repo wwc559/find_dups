@@ -120,12 +120,7 @@ impl<T> std::fmt::Debug for Record<T> {
 
 impl<T> Record<T> {
     /// Create a new record reader/writer
-    pub fn new(
-        archive: &String,
-        record_type: String,
-        file_limit: usize,
-        record_limit: usize,
-    ) -> Self {
+    pub fn new(archive: &str, record_type: String, file_limit: usize, record_limit: usize) -> Self {
         Record {
             write_buffer: Vec::new(),
             read_buffer: ReadBuf::new(),
@@ -244,6 +239,11 @@ impl<T> Record<T> {
     /// seek to a specific record
     pub fn seek(&mut self, location: ArchiveLocation) -> Result<()> {
         self.archive.seek(location)?;
+        Ok(())
+    }
+    /// backup an archive
+    pub async fn backup(&self) -> Result<()> {
+        self.archive.backup().await?;
         Ok(())
     }
 }
